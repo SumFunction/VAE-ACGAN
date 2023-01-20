@@ -1,8 +1,7 @@
-# Build an encoder
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import torch.optim as optim
 
 #分类网络
 class Lenet(nn.Module):
@@ -11,14 +10,16 @@ class Lenet(nn.Module):
         self.fc0 = nn.Linear(input_dim, 128)
         self.fc1 = nn.Linear(128 , 256)
         self.fc2 = nn.Linear(256, 128)
+        self.dropout = nn.Dropout(p = 0.5)
         self.fc3 = nn.Linear(128,num_classes)
-        import torch.optim as optim
         decay = 3.5 / 100 #TODO 3.5/batchsize大小，后期改为动态
-        self.optimizer =   optim.Adadelta(self.parameters(), lr=1.0, rho=0.9, eps=1e-6, weight_decay=decay)
+        #self.optimizer =  optim.Adadelta(self.parameters(), lr=1.0, rho=0.9, eps=1e-6, weight_decay=decay)
+        self.optimizer = optim.Adam(self.parameters(), lr=0.001)
     def forward(self, x):
         x = F.relu(self.fc0(x))
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
+        x = self.dropout(x)
         return self.fc3(x)
 
 #编码器

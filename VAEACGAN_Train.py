@@ -3,6 +3,7 @@ from model import *
 import torch.optim as optim
 from torch.optim import lr_scheduler
 import numpy as np
+from eval import test
 
 def latent_loss(mu, log_var):
 
@@ -19,19 +20,18 @@ def reparameterize(mu, log_var):
     eps = Variable(std.data.new(std.size()).normal_())
     return eps.mul(std).add_(mu)
 
-def initDataloader():
-    pass
-
 class VAEACGAN(object):
-    def __init__(self,dataloader):
+    def __init__(self,args,train_loader,test_loader):
         # parameters
-        self.epoch = 50
+        self.num_classes = args.num_classes #分类类别数
+        self.args = args
+        self.epochs = args.epochs
         self.sample_num = 100
-        self.batch_size = 64
+        self.batch_size = args.batch_size
         self.save_dir = 'models'
         self.result_dir = 'results'
         self.log_dir = 'logs'
-        self.gpu_mode = True
+        self.gpu_mode = args.gpu_mode
         self.model_name = 'VAEACGAN'
 
         self.model = Lenet() #分类器
@@ -61,10 +61,37 @@ class VAEACGAN(object):
             self.CE_loss = nn.CrossEntropyLoss()
             self.MSE_loss = nn.MSELoss()
 
-        self.dataloader = dataloader
-    def train(self):
-        pass
-    def antagonisticTrain(self):#对抗训练
+        self.train_loader = train_loader
+        self.test_loader = test_loader
+    def train(self,best_acc): #普通分类网络训练
+        self.model.train()
+        loss = None
+        criterion = nn.CrossEntropyLoss()
+        tot_loss = 0
+        for epoch in range(self.epochs):
+            for batch_idx, (data, target) in enumerate(self.train_loader):
+                if self.gpu_mode:
+                    data, target = data.to(self.device), target.to(self.device)
+                data, target = Variable(data), Variable(target)
+
+                self.model.optimizer.zero_grad()
+                output = self.model(data)
+
+                loss = criterion(output, target)
+                tot_loss += loss.item()
+                loss.backward()
+                self.model.optimizer.step()
+
+            tot_loss /= len(self.train_loader)
+
+            if epoch % 20 == 0:
+                print('Train Epoch: {} \tLoss: {:.6f}'.format(
+                    epoch, tot_loss))
+                test_loss,best_acc = test(self.model,epoch,self.test_loader,best_acc)
+            tot_loss = 0
+        return best_acc
+    def antagonisticTrain(self,best_acc):#对抗训练
+
         self.train_hist = {}
         self.train_hist['E_loss'] = []
         self.train_hist['D_loss'] = []
@@ -81,15 +108,19 @@ class VAEACGAN(object):
         else:
             self.y_real_, self.y_fake_ = Variable(torch.ones(self.batch_size, 1)), Variable(torch.zeros(self.batch_size, 1))
 
-        for epoch in range(10):
+        for epoch in range(self.epochs):
             self.G.train()
             self.E_scheduler.step()
             self.G_scheduler.step()
             self.D_scheduler.step()
-            for iter,(x_,labels) in enumerate(self.dataloader):
+            t_C_loss = 0
+            t_E_loss = 0
+            t_D_loss = 0
+            t_G_loss = 0
+            for iter,(x_,labels) in enumerate(self.train_loader):
 
                 #对label进行ont-hot编码 注意这里二分类
-                y_vec_ = np.zeros((len(labels), 2), dtype=np.float)
+                y_vec_ = np.zeros((len(labels), self.num_classes), dtype=np.float)
                 for i, label in enumerate(labels):
                     y_vec_[i, label] = 1
 
@@ -191,10 +222,16 @@ class VAEACGAN(object):
 
                 C_loss.backward(retain_graph=True)
                 self.model.optimizer.step()
-                if ((iter + 1) % 1) == 0:
-                    print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f, C_loss: %.8f, E_loss: %.8f" %
-                          ((epoch + 1), (iter + 1), len(vae.dataloader.dataset) // self.batch_size, D_loss.item(), G_loss.item()
-                           , C_loss.item(), E_loss.item()))
 
+                t_C_loss += C_loss.item()
+                t_E_loss += E_loss.item()
+                t_D_loss += D_loss.item()
+                t_G_loss += G_loss.item()
+            print("Epoch: [%2d] D_loss: %.8f, G_loss: %.8f, C_loss: %.8f, E_loss: %.8f" %
+                  ((epoch + 1), t_D_loss / len(self.train_loader), t_G_loss / len(self.train_loader)
+                   , t_C_loss / len(self.train_loader), t_E_loss / len(self.train_loader)))
+            self.model.eval()
+            _, best_acc = test(self.model,self.epochs,self.test_loader,best_acc)
+        return best_acc
 
 
