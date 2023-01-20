@@ -1,5 +1,5 @@
-from network.data import getDataLoader
-from network.model import Encoder,Generator,Discriminator,Lenet
+from data import getDataLoader
+from model import Encoder,Generator,Discriminator,Lenet
 import torch
 loader = getDataLoader()
 encoder = Encoder()

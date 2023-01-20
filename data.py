@@ -12,7 +12,7 @@ class MyDataset(Dataset):
         return len(self.data)
 def getDataLoader():
     # 读取csv文件
-    df = pd.read_csv("../train.csv")
+    df = pd.read_csv("data/train.csv")
     # 将数据转换为numpy数组
     data = df.iloc[:, :5].values
     label = df.iloc[:, -1].values

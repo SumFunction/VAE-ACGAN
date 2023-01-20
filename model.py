@@ -12,6 +12,9 @@ class Lenet(nn.Module):
         self.fc1 = nn.Linear(128 , 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128,num_classes)
+        import torch.optim as optim
+        decay = 3.5 / 100 #TODO 3.5/batchsize大小，后期改为动态
+        self.optimizer =   optim.Adadelta(self.parameters(), lr=1.0, rho=0.9, eps=1e-6, weight_decay=decay)
     def forward(self, x):
         x = F.relu(self.fc0(x))
         x = F.relu(self.fc1(x))
