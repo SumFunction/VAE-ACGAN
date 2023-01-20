@@ -2,7 +2,6 @@ from torch.autograd import Variable
 from model import *
 import torch.optim as optim
 from torch.optim import lr_scheduler
-from data import getDataLoader
 import numpy as np
 
 def latent_loss(mu, log_var):
@@ -24,7 +23,7 @@ def initDataloader():
     pass
 
 class VAEACGAN(object):
-    def __init__(self):
+    def __init__(self,dataloader):
         # parameters
         self.epoch = 50
         self.sample_num = 100
@@ -62,8 +61,10 @@ class VAEACGAN(object):
             self.CE_loss = nn.CrossEntropyLoss()
             self.MSE_loss = nn.MSELoss()
 
-        self.dataloader = getDataLoader()
+        self.dataloader = dataloader
     def train(self):
+        pass
+    def antagonisticTrain(self):#对抗训练
         self.train_hist = {}
         self.train_hist['E_loss'] = []
         self.train_hist['D_loss'] = []
@@ -196,7 +197,4 @@ class VAEACGAN(object):
                            , C_loss.item(), E_loss.item()))
 
 
-if __name__ == '__main__':
-    vae = VAEACGAN()
-    vae.train()
 
