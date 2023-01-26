@@ -4,6 +4,28 @@ import torch.optim as optim
 from torch.optim import lr_scheduler
 import numpy as np
 from eval import test
+import torch
+
+#二元分类 focal loss
+class FocalLoss(nn.Module):
+    '''
+    Multi-class Focal Loss
+    '''
+    def __init__(self, gamma=2, weight=None):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.weight = weight
+
+    def forward(self, input, target):
+        """
+        input: [N, C], float32
+        target: [N, ], int64
+        """
+        logpt = F.log_softmax(input, dim=1)
+        pt = torch.exp(logpt)
+        logpt = (1-pt)**self.gamma * logpt
+        loss = F.nll_loss(logpt, target, self.weight)
+        return loss
 
 def latent_loss(mu, log_var):
 
@@ -25,8 +47,8 @@ class VAEACGAN(object):
         # parameters
         self.num_classes = args.num_classes #分类类别数
         self.args = args
+        self.pre_epochs = args.pre_epochs
         self.epochs = args.epochs
-        self.sample_num = 100
         self.batch_size = args.batch_size
         self.save_dir = 'models'
         self.result_dir = 'results'
@@ -34,14 +56,18 @@ class VAEACGAN(object):
         self.gpu_mode = args.gpu_mode
         self.model_name = 'VAEACGAN'
 
+        self.focal_loss = FocalLoss()
+
         self.model = Lenet() #分类器
         self.E = Encoder()          # Encoder
         self.G = Generator()        # Generator/Decoder
         self.D = Discriminator()    # Discriminator
 
-        self.E_optimizer = optim.Adadelta(self.E.parameters(), lr=1.0, rho=0.9, eps=1e-6)
-        self.G_optimizer = optim.Adadelta(self.G.parameters(), lr=1.0, rho=0.9, eps=1e-6)
-        self.D_optimizer = optim.Adadelta(self.D.parameters(), lr=1.0, rho=0.9, eps=1e-6)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=args.c_lr)
+
+        self.E_optimizer = optim.Adadelta(self.E.parameters(), lr=args.e_lr, rho=0.9, eps=1e-6)
+        self.G_optimizer = optim.Adadelta(self.G.parameters(), lr=args.g_lr, rho=0.9, eps=1e-6)
+        self.D_optimizer = optim.Adadelta(self.D.parameters(), lr=args.d_lr, rho=0.9, eps=1e-6)
 
         self.E_scheduler = lr_scheduler.StepLR(self.E_optimizer, step_size=8, gamma=0.5, last_epoch=-1)
         self.G_scheduler = lr_scheduler.StepLR(self.G_optimizer, step_size=8, gamma=0.5, last_epoch=-1)
@@ -68,23 +94,24 @@ class VAEACGAN(object):
         loss = None
         criterion = nn.CrossEntropyLoss()
         tot_loss = 0
-        for epoch in range(self.epochs):
+        for epoch in range(self.pre_epochs):
             for batch_idx, (data, target) in enumerate(self.train_loader):
                 if self.gpu_mode:
                     data, target = data.to(self.device), target.to(self.device)
                 data, target = Variable(data), Variable(target)
 
-                self.model.optimizer.zero_grad()
+                self.optimizer.zero_grad()
                 output = self.model(data)
-
-                loss = criterion(output, target)
+                #focal loss
+                loss = self.focal_loss(output,target)
+                #loss = criterion(output, target)
                 tot_loss += loss.item()
                 loss.backward()
-                self.model.optimizer.step()
+                self.optimizer.step()
 
             tot_loss /= len(self.train_loader)
 
-            if epoch % 20 == 0:
+            if epoch % 10 == 0:
                 print('Train Epoch: {} \tLoss: {:.6f}'.format(
                     epoch, tot_loss))
                 test_loss,best_acc = test(self.model,epoch,self.test_loader,best_acc)
@@ -184,7 +211,7 @@ class VAEACGAN(object):
                 # Fix G, update D, C network
 
                 self.D_optimizer.zero_grad()
-                self.model.optimizer.zero_grad()
+                self.optimizer.zero_grad()
 
                 D_real = self.D(x_)
                 C_real = self.model(x_)
@@ -221,7 +248,7 @@ class VAEACGAN(object):
                 self.D_optimizer.step()
 
                 C_loss.backward(retain_graph=True)
-                self.model.optimizer.step()
+                self.optimizer.step()
 
                 t_C_loss += C_loss.item()
                 t_E_loss += E_loss.item()

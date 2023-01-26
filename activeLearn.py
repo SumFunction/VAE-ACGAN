@@ -13,18 +13,18 @@ def acquire_points(args,vae,
                    best_acc,
                    random_sample=False):
 
-    model = vae.model #分类模型
-    acquisition_iterations = 100
-    dropout_iterations = 20  # [50, 100, 500, 1000]
-    Queries = 100
+    model = vae.model
+    acquisition_iterations = args.acquisition_iterations
+    dropout_iterations = args.dropout_iterations
+    Queries = args.Queries
     nb_samples = 100
     pool_all = np.zeros(shape=(1))
 
-    acquisition_function = variation_ratios_acquisition #TODO 目前仅实现VAR_RATIOS查询函数
+    acquisition_function = variation_ratios_acquisition
 
     test_acc_hist = []
     for i in range(acquisition_iterations):
-        pool_subset = 2000
+        pool_subset = args.pool_subset
         if random_sample:
             pool_subset = Queries
         print('---------------------------------')
@@ -38,9 +38,9 @@ def acquire_points(args,vae,
 
         else:
             points_of_interest = acquisition_function(args,model,dropout_iterations, pool_data_dropout, pool_target_dropout)
-            pool_index = points_of_interest.argsort()[-Queries:][::-1]
+            pool_index = points_of_interest.argsort()[-Queries:][::-1] #取出熵值最大的后100个数据集下标
 
-        pool_index = torch.from_numpy(np.flip(pool_index, axis=0).copy())
+        pool_index = torch.from_numpy(np.flip(pool_index, axis=0).copy()) #将下标进行翻转
 
         pool_all = np.append(pool_all, pool_index)
 
@@ -49,6 +49,12 @@ def acquire_points(args,vae,
 
         train_data = torch.cat((train_data, pooled_data), 0)
         train_target = torch.cat((train_target, pooled_target), 0)
+
+        new_dataset = MyDataset(train_data, train_target)
+        # 创建经过选好的数据集丢入学习
+        new_dataloader = DataLoader(new_dataset, batch_size=args.batch_size, shuffle=True)
+        vae.train_loader = new_dataloader
+
         #remove from pool set
         pool_data,pool_target = remove_pooled_points(pool_subset, pool_data_dropout, pool_target_dropout, pool_index,pool_data,pool_target)
 
@@ -63,6 +69,7 @@ def acquire_points(args,vae,
 
 def variation_ratios_acquisition(args,model,dropout_iterations, pool_data_dropout, pool_target_dropout):
     # print("VARIATIONAL RATIOS ACQUSITION FUNCTION")
+    #[2000,1]
     All_Dropout_Classes = np.zeros(shape=(pool_data_dropout.size(0), 1))
     # Validation Dataset
     pool = MyDataset(pool_data_dropout,pool_target_dropout)
@@ -77,15 +84,17 @@ def variation_ratios_acquisition(args,model,dropout_iterations, pool_data_dropou
         predictions = np.array(predictions)
         predictions = np.expand_dims(predictions, axis=1)
         All_Dropout_Classes = np.append(All_Dropout_Classes, predictions, axis=1)
-    # print("Dropout Iterations took --- %s seconds ---" % (time.time() - start_time))
-    # print (All_Dropout_Classes)
+    #[2000,21]
+    #[2000,]
     Variation = np.zeros(shape=(pool_data_dropout.size(0)))
     for t in range(pool_data_dropout.size(0)):
         L = np.array([0])
         for d_iter in range(dropout_iterations):
-            L = np.append(L, All_Dropout_Classes[t, d_iter + 1])
+            L = np.append(L, All_Dropout_Classes[t, d_iter + 1]) #[21,]
         Predicted_Class, Mode = mode(L[1:]) #计算本次iter中 出现次数最多的classes以及出现次数
-        v = np.array([1 - Mode / float(dropout_iterations)])
+        v = args.l1 * np.array([1 - Mode / float(dropout_iterations)])
+        v += args.l2 * np.array(torch.sum(pool_data_dropout[t],dim=0))
+        #自己添加的部分 计算每个特征值
         Variation[t] = v #这个样本在所有iter中的权重值
     points_of_interest = Variation.flatten()
     return points_of_interest
